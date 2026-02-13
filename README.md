@@ -1,25 +1,60 @@
 # Document-Based Q&A using RAG
 
-A local Retrieval-Augmented Generation (RAG) app for asking questions over PDF documents.
+[![CI](https://github.com/Sanjeev2004/Document-based-Q-A-using-RAG-project/actions/workflows/ci.yml/badge.svg)](https://github.com/Sanjeev2004/Document-based-Q-A-using-RAG-project/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+![Tests](https://img.shields.io/badge/tests-11%20passing-brightgreen)
 
-## What It Does
+A production-style local RAG application for answering questions from PDFs with citations and robust retrieval controls.
 
-- Ingests PDFs with page-level metadata
-- Chunks text semantically
-- Stores embeddings in local ChromaDB
-- Uses hybrid retrieval (vector + BM25) with cross-encoder reranking
-- Generates answers with citations through a Hugging Face hosted LLM
-- Provides a Streamlit UI for ingestion and Q&A
+## Why This Project Stands Out
 
-## Tech Stack
+- Hybrid retrieval pipeline: vector search + BM25 + cross-encoder reranking.
+- Source-aware querying: restrict answers to latest uploaded documents.
+- Recovery-first design: Chroma corruption detection + auto-repair flow.
+- Batch ingestion support with per-file success/failure reporting.
+- Fast feedback loop: health checks + automated CI + tests.
 
-- Python 3.10+
-- Streamlit
-- LangChain ecosystem (`langchain`, `langchain-community`, `langchain-huggingface`, `langchain-chroma`, `langchain-experimental`)
-- ChromaDB (local persistent vector store)
-- `sentence-transformers/all-MiniLM-L6-v2` embeddings
-- `cross-encoder/ms-marco-MiniLM-L-6-v2` reranker
-- Hugging Face Inference Endpoint for generation
+## Key Outcomes
+
+- `11` automated tests passing (`pytest -q`).
+- End-to-end health verification command (`python health_check.py`).
+- Stable local vector store lifecycle:
+  - clear/replace knowledge base
+  - refresh runtime retriever/generator cache
+  - isolate and recover broken Chroma state
+
+## Demo Flow
+
+1. Upload one or more PDFs in **Document Knowledge Base**.
+2. Choose whether to replace previous index entries.
+3. Query in **Chat & Query**.
+4. Optionally enforce **latest uploaded files only** to avoid stale answers.
+5. Inspect reranked citation evidence (source + page + score).
+
+## Architecture
+
+```text
+PDF(s)
+  -> page-level extraction (pdfplumber)
+  -> semantic chunking (LangChain Experimental)
+  -> embeddings (sentence-transformers)
+  -> local ChromaDB index
+  -> retrieval (vector + BM25)
+  -> cross-encoder rerank (MS MARCO MiniLM)
+  -> answer generation (Hugging Face chat completion)
+  -> cited response in Streamlit
+```
+
+## Engineering Decisions
+
+- **ChromaDB (local)** over managed vector DB:
+  - better for portfolio reproducibility and zero infra setup.
+- **Hybrid retrieval + reranking** over plain similarity search:
+  - improves precision on mixed keyword/semantic queries.
+- **Source filtering**:
+  - prevents old PDFs from dominating answers after new ingestion.
+- **Health checks and tests in repo**:
+  - signals engineering rigor to recruiters and contributors.
 
 ## Project Layout
 
@@ -29,15 +64,12 @@ A local Retrieval-Augmented Generation (RAG) app for asking questions over PDF d
 |- health_check.py
 |- src/
 |  |- config.py
+|  |- vectorstore.py
 |  |- ingestion.py
 |  |- retrieval.py
 |  `- generator.py
 |- tests/
-|  |- test_ingestion.py
-|  |- test_retrieval.py
-|  `- test_generator.py
-|- data/
-|  `- chroma_db/
+|- .env.example
 |- requirements.txt
 `- RUN_INSTRUCTIONS.md
 ```
@@ -51,56 +83,46 @@ A local Retrieval-Augmented Generation (RAG) app for asking questions over PDF d
 pip install -r requirements.txt
 ```
 
-3. Create `.env` and set values:
+3. Copy env template:
 
-```env
-HUGGINGFACE_API_KEY=your_hf_token
-HUGGINGFACE_MODEL=meta-llama/Meta-Llama-3-70B-Instruct
-EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
-CHROMA_PERSIST_DIRECTORY=./data/chroma_db
-TOP_K=10
-RERANK_TOP_K=3
+```bash
+cp .env.example .env
 ```
+
+4. Add your `HUGGINGFACE_API_KEY` in `.env`.
 
 ## Run
 
-Pre-flight check:
-
 ```bash
 python health_check.py
+streamlit run app.py
 ```
 
-If you want to skip remote model invocation:
+If you want local-only checks:
 
 ```bash
 python health_check.py --skip-llm
 ```
 
-```bash
-streamlit run app.py
-```
+## Tests and CI
 
-Then:
-
-1. Open **Document Knowledge Base** tab and ingest a PDF.
-2. Open **Chat & Query** tab, start the engine, and ask questions.
-
-## Tests
-
-Run the minimal contract test suite:
+- Local:
 
 ```bash
 pytest -q
 ```
 
-## Notes
+- GitHub Actions CI (`.github/workflows/ci.yml`) runs on push/PR to `main`.
 
-- Re-ingesting the same file replaces previous chunks for that file to avoid duplication.
-- If no relevant context is found, the app returns a safe fallback answer.
-- After ingestion, the runtime retriever/generator cache is reset so new documents are immediately available.
+## Failure Modes and Recovery
 
-## Troubleshooting
+- Chroma Rust panic / tenant errors:
+  - auto-repair utility moves broken DB to timestamped backup and recreates a fresh store.
+- Outdated retrieval results:
+  - replace knowledge base during ingestion and/or enable latest-source query filter.
+- Missing LLM access:
+  - health check surfaces token/model issues before app startup.
 
-- `HUGGINGFACE_API_KEY not set`: add a valid token in `.env`.
-- Empty answers after ingestion: confirm the PDF has extractable text (not scanned images only).
-- Slow responses: use a smaller Hugging Face model and lower `TOP_K`.
+## Resume-Ready Summary
+
+Built a robust document Q&A RAG system using Python, LangChain, ChromaDB, and Hugging Face. Implemented hybrid retrieval with cross-encoder reranking, source-scoped querying, batch ingestion, health checks, and CI-tested reliability for production-like behavior.

@@ -162,6 +162,22 @@ def ingest_documents(file_paths: List[str], source_names: Optional[List[str]] = 
     return {"ingested": ingested, "failed": failed, "total_chunks": total_chunks}
 
 
+def clear_vectorstore() -> int:
+    """
+    Remove all documents from the current ChromaDB collection.
+    Returns number of deleted records.
+    """
+    print(f"Initializing Embeddings for clear operation: {EMBEDDING_MODEL}")
+    embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
+    vectorstore = get_chroma_vectorstore(embeddings, allow_repair=True)
+    data = vectorstore.get()
+    ids = data.get("ids", []) if data else []
+    if ids:
+        vectorstore.delete(ids=ids)
+    print(f"Cleared vectorstore documents: {len(ids)}")
+    return len(ids)
+
+
 if __name__ == "__main__":
     import sys
 

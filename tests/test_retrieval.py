@@ -45,3 +45,14 @@ def test_advanced_retriever_falls_back_to_base_retriever():
     docs = retriever.get_relevant_documents("anything")
     assert len(docs) == 1
     assert docs[0].page_content == "fallback"
+
+
+def test_advanced_retriever_source_filter_applies():
+    docs = [
+        Document(page_content="a", metadata={"source": "new.pdf"}),
+        Document(page_content="b", metadata={"source": "old.pdf"}),
+    ]
+    retriever = AdvancedRetriever.__new__(AdvancedRetriever)
+    filtered = retriever._filter_by_sources(docs, ["new.pdf"])
+    assert len(filtered) == 1
+    assert filtered[0].metadata["source"] == "new.pdf"

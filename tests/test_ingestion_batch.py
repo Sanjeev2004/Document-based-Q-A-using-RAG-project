@@ -40,3 +40,26 @@ def test_ingest_documents_partial_failure(monkeypatch):
     assert result["total_chunks"] == 5
     assert result["ingested"][0]["source"] == "ok.pdf"
     assert result["failed"][0]["source"] == "bad.pdf"
+
+
+def test_clear_vectorstore_deletes_all_ids(monkeypatch):
+    class _FakeEmbeddings:
+        pass
+
+    class _FakeVectorStore:
+        def __init__(self):
+            self.deleted = None
+
+        def get(self):
+            return {"ids": ["1", "2", "3"]}
+
+        def delete(self, ids=None):
+            self.deleted = ids
+
+    fake_vs = _FakeVectorStore()
+    monkeypatch.setattr(ingestion, "HuggingFaceEmbeddings", lambda model_name: _FakeEmbeddings())
+    monkeypatch.setattr(ingestion, "get_chroma_vectorstore", lambda embeddings, allow_repair=True: fake_vs)
+
+    deleted = ingestion.clear_vectorstore()
+    assert deleted == 3
+    assert fake_vs.deleted == ["1", "2", "3"]

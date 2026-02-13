@@ -1,5 +1,5 @@
 
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
 from huggingface_hub import InferenceClient
 
 from src.config import (
@@ -40,7 +40,7 @@ class RAGGenerator:
 
         return "I couldn't generate an answer at the moment."
 
-    def answer_question(self, question: str) -> Dict[str, Any]:
+    def answer_question(self, question: str, source_filter: Optional[List[str]] = None) -> Dict[str, Any]:
         """
         Generate answer for a question.
         """
@@ -53,7 +53,11 @@ class RAGGenerator:
         question = question.strip()
 
         # 1. Retrieve
-        retrieved_docs = self.retriever.get_relevant_documents(question)
+        try:
+            retrieved_docs = self.retriever.get_relevant_documents(question, source_filter=source_filter)
+        except TypeError:
+            # Backward compatibility for older retriever mocks/implementations.
+            retrieved_docs = self.retriever.get_relevant_documents(question)
 
         context_str = ""
         source_docs = []

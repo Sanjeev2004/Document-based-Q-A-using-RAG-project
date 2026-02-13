@@ -1,5 +1,5 @@
 
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Set
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.retrievers import BM25Retriever
 from langchain_community.cross_encoders import HuggingFaceCrossEncoder
@@ -153,7 +153,15 @@ class AdvancedRetriever:
             base_retriever=self.base_retriever
         )
 
-    def get_relevant_documents(self, query: str) -> List[Document]:
+    def _filter_by_sources(self, docs: List[Document], source_filter: Optional[List[str]]) -> List[Document]:
+        if not source_filter:
+            return docs
+        allowed: Set[str] = {s for s in source_filter if isinstance(s, str) and s.strip()}
+        if not allowed:
+            return docs
+        return [d for d in docs if (d.metadata or {}).get("source") in allowed]
+
+    def get_relevant_documents(self, query: str, source_filter: Optional[List[str]] = None) -> List[Document]:
         """
         Retrieve relevant documents with reranking and fallback.
         """
@@ -169,7 +177,7 @@ class AdvancedRetriever:
             except Exception as e2:
                 print(f"!!! Error in Base Retrieval: {e2}")
                 return []
-        return docs
+        return self._filter_by_sources(docs, source_filter)
 
 # Global instance
 _retriever_instance = None
