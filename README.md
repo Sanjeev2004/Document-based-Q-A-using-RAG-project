@@ -1,62 +1,70 @@
-# Document-Based Q&A using RAG
+# Document Based Q&A with RAG
 
 [![CI](https://github.com/Sanjeev2004/Document-based-Q-A-using-RAG-project/actions/workflows/ci.yml/badge.svg)](https://github.com/Sanjeev2004/Document-based-Q-A-using-RAG-project/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![Tests](https://img.shields.io/badge/tests-11%20passing-brightgreen)
 
-A production-style local RAG application for answering questions from PDFs with citations and robust retrieval controls.
+Document Based Q&A is a local Retrieval-Augmented Generation (RAG) system that answers questions from PDFs with source citations, hybrid retrieval, and reranking.
 
-## Why This Project Stands Out
+## 1. Project Highlights
 
-- Hybrid retrieval pipeline: vector search + BM25 + cross-encoder reranking.
-- Source-aware querying: restrict answers to latest uploaded documents.
-- Recovery-first design: Chroma corruption detection + auto-repair flow.
-- Batch ingestion support with per-file success/failure reporting.
-- Fast feedback loop: health checks + automated CI + tests.
+- Upload one or many PDFs and index them in local ChromaDB.
+- Ask questions from a clean Streamlit UI.
+- Hybrid retrieval: vector search + BM25 lexical search.
+- Cross-encoder reranking (`ms-marco-MiniLM`) for higher precision.
+- Source-aware querying: restrict answers to latest uploaded files only.
+- Health checks, auto-repair path for Chroma issues, and CI-backed tests.
 
-## Key Outcomes
+## 2. Architecture Diagram
 
-- `11` automated tests passing (`pytest -q`).
-- End-to-end health verification command (`python health_check.py`).
-- Stable local vector store lifecycle:
-  - clear/replace knowledge base
-  - refresh runtime retriever/generator cache
-  - isolate and recover broken Chroma state
+### Mermaid
 
-## Demo Flow
-
-1. Upload one or more PDFs in **Document Knowledge Base**.
-2. Choose whether to replace previous index entries.
-3. Query in **Chat & Query**.
-4. Optionally enforce **latest uploaded files only** to avoid stale answers.
-5. Inspect reranked citation evidence (source + page + score).
-
-## Architecture
-
-```text
-PDF(s)
-  -> page-level extraction (pdfplumber)
-  -> semantic chunking (LangChain Experimental)
-  -> embeddings (sentence-transformers)
-  -> local ChromaDB index
-  -> retrieval (vector + BM25)
-  -> cross-encoder rerank (MS MARCO MiniLM)
-  -> answer generation (Hugging Face chat completion)
-  -> cited response in Streamlit
+```mermaid
+flowchart TD
+    A[PDF Upload] --> B[PDF Text Extraction<br/>pdfplumber]
+    B --> C[Semantic Chunking<br/>LangChain SemanticChunker]
+    C --> D[Embeddings<br/>all-MiniLM-L6-v2]
+    D --> E[ChromaDB Local Index]
+    Q[User Query] --> F[Retriever Layer]
+    E --> F
+    F --> G[Hybrid Retrieval<br/>Vector + BM25]
+    G --> H[Cross-Encoder Reranker<br/>MS MARCO MiniLM]
+    H --> I[Prompt Assembly with Citations]
+    I --> J[Hugging Face Chat Completion]
+    J --> K[Answer + Evidence in Streamlit]
 ```
 
-## Engineering Decisions
+### Text Flow
 
-- **ChromaDB (local)** over managed vector DB:
-  - better for portfolio reproducibility and zero infra setup.
-- **Hybrid retrieval + reranking** over plain similarity search:
-  - improves precision on mixed keyword/semantic queries.
-- **Source filtering**:
-  - prevents old PDFs from dominating answers after new ingestion.
-- **Health checks and tests in repo**:
-  - signals engineering rigor to recruiters and contributors.
+```text
+PDF(s) -> Extraction -> Semantic Chunks -> Embeddings -> ChromaDB
+User Question -> Hybrid Retrieval -> Cross-Encoder Rerank -> LLM -> Cited Answer
+```
 
-## Project Layout
+## 3. Numbered Approach
+
+1. **Collect input documents**
+   Store uploaded PDFs temporarily and preserve original filenames as source metadata.
+2. **Extract page-level text**
+   Parse each page with `pdfplumber`; skip empty pages.
+3. **Chunk semantically**
+   Use semantic boundaries instead of fixed-size splitting to keep context coherent.
+4. **Create embeddings**
+   Encode chunks with `sentence-transformers/all-MiniLM-L6-v2`.
+5. **Index in ChromaDB**
+   Persist vectors locally and de-duplicate by source filename + chunk index.
+6. **Retrieve candidates**
+   Run both vector retrieval and BM25 retrieval to balance semantic and keyword matching.
+7. **Rerank candidates**
+   Score retrieved chunks with `cross-encoder/ms-marco-MiniLM-L-6-v2`.
+8. **Filter by source scope (optional)**
+   Restrict retrieval to latest uploaded files to avoid stale-answer leakage.
+9. **Generate answer with citations**
+   Build grounded prompt from retrieved chunks and generate via Hugging Face API.
+10. **Return answer + evidence**
+    Show answer and expandable citation blocks with source, page, and rerank score.
+
+## 4. Project Structure
 
 ```text
 .
@@ -69,60 +77,89 @@ PDF(s)
 |  |- retrieval.py
 |  `- generator.py
 |- tests/
+|  |- test_generator.py
+|  |- test_ingestion.py
+|  |- test_ingestion_batch.py
+|  `- test_retrieval.py
 |- .env.example
 |- requirements.txt
 `- RUN_INSTRUCTIONS.md
 ```
 
-## Setup
+## 5. Setup
 
 1. Create and activate a virtual environment.
-2. Install dependencies:
+2. Install dependencies.
+3. Copy environment template.
+4. Add your Hugging Face token.
 
 ```bash
+python -m venv venv
+# Windows
+venv\Scripts\activate
+# Linux/macOS
+source venv/bin/activate
+
 pip install -r requirements.txt
-```
 
-3. Copy env template:
-
-```bash
 cp .env.example .env
 ```
 
-4. Add your `HUGGINGFACE_API_KEY` in `.env`.
+Required `.env` key:
 
-## Run
+```env
+HUGGINGFACE_API_KEY=hf_xxx
+```
+
+## 6. Run
 
 ```bash
 python health_check.py
 streamlit run app.py
 ```
 
-If you want local-only checks:
+Local-only validation:
 
 ```bash
 python health_check.py --skip-llm
 ```
 
-## Tests and CI
+## 7. Testing and CI
 
-- Local:
+Run tests locally:
 
 ```bash
 pytest -q
 ```
 
-- GitHub Actions CI (`.github/workflows/ci.yml`) runs on push/PR to `main`.
+CI workflow:
 
-## Failure Modes and Recovery
+- File: `.github/workflows/ci.yml`
+- Trigger: push and pull request on `main`
+- Steps: install deps, run `pytest -q`
 
-- Chroma Rust panic / tenant errors:
-  - auto-repair utility moves broken DB to timestamped backup and recreates a fresh store.
-- Outdated retrieval results:
-  - replace knowledge base during ingestion and/or enable latest-source query filter.
-- Missing LLM access:
-  - health check surfaces token/model issues before app startup.
+## 8. Reliability Features
 
-## Resume-Ready Summary
+1. ChromaDB corruption/incompatibility detection.
+2. Auto-repair path that moves old DB to timestamped backup.
+3. Health-check command for env, Chroma, and model reachability.
+4. Runtime cache reset after ingestion to avoid stale retriever state.
+5. Replace-index option for hard refresh of knowledge base.
 
-Built a robust document Q&A RAG system using Python, LangChain, ChromaDB, and Hugging Face. Implemented hybrid retrieval with cross-encoder reranking, source-scoped querying, batch ingestion, health checks, and CI-tested reliability for production-like behavior.
+## 9. Recruiter-Focused Value
+
+1. Demonstrates end-to-end LLM system design, not just prompt usage.
+2. Shows production-minded patterns: observability, failure handling, and tests.
+3. Balances retrieval quality with latency using staged retrieval + reranking.
+4. Delivers practical UX controls (latest-source filter, batch ingestion).
+
+## 10. Roadmap
+
+1. Metadata filters (date/type/category) at query time.
+2. Conversation memory for multi-turn context.
+3. Dockerized one-command local deployment.
+4. Benchmark harness for retrieval quality and latency tracking.
+
+## 11. License
+
+Add a `LICENSE` file (MIT recommended) before public portfolio distribution.

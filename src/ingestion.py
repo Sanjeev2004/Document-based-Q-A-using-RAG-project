@@ -101,6 +101,11 @@ def ingest_document(file_path: str, source_name: Optional[str] = None) -> Dict[s
     """
     Ingest a document using advanced RAG techniques (ChromaDB).
     """
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"File not found: {file_path}")
+    if not file_path.lower().endswith(".pdf"):
+        raise ValueError("Only PDF files are supported for ingestion.")
+
     print(f"Initializing Embeddings: {EMBEDDING_MODEL}")
     embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
     print(f"Connecting ChromaDB at {CHROMA_PERSIST_DIRECTORY}...")
