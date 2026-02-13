@@ -1,60 +1,50 @@
-
 import os
-import time
-from typing import List
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_pinecone import PineconeVectorStore
-from langchain_experimental.text_splitter import SemanticChunker
-from langchain_core.documents import Document
-from pinecone import Pinecone, ServerlessSpec, PodSpec
-
-# Import from local source config
-try:
-    from src.config import (
-        EMBEDDING_MODEL,
-        PINECONE_API_KEY,
-        PINECONE_ENVIRONMENT,
-        PINECONE_INDEX_NAME
-    )
-except ImportError:
-    # Fallback for running script directly
-    import sys
-    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from src.config import (
-        EMBEDDING_MODEL,
-        PINECONE_API_KEY,
-        PINECONE_ENVIRONMENT,
-        PINECONE_INDEX_NAME
-    )
+from typing import Dict, List, Optional
 
 import pdfplumber
+from langchain_core.documents import Document
+from langchain_experimental.text_splitter import SemanticChunker
+from langchain_huggingface import HuggingFaceEmbeddings
 
-def load_pdf_with_metadata(file_path: str) -> List[Document]:
+from src.vectorstore import get_chroma_vectorstore
+
+try:
+    from src.config import EMBEDDING_MODEL, CHROMA_PERSIST_DIRECTORY
+except ImportError:
+    import sys
+
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from src.config import EMBEDDING_MODEL, CHROMA_PERSIST_DIRECTORY
+
+
+def load_pdf_with_metadata(file_path: str, source_name: Optional[str] = None) -> List[Document]:
     """
     Load PDF with page numbers and filename metadata.
     """
     documents = []
-    filename = os.path.basename(file_path)
-    
+    filename = source_name or os.path.basename(file_path)
+
     try:
         with pdfplumber.open(file_path) as pdf:
             for i, page in enumerate(pdf.pages):
                 text = page.extract_text()
                 if text and text.strip():
-                    documents.append(Document(
-                        page_content=text,
-                        metadata={
-                            "source": filename,
-                            "page": i + 1,
-                            "file_path": file_path
-                        }
-                    ))
-    except Exception as e:
-        print(f"Error loading PDF with pdfplumber: {e}")
-        # Fallback would go here if needed
-        raise e
-        
+                    documents.append(
+                        Document(
+                            page_content=text,
+                            metadata={
+                                "source": filename,
+                                "page": i + 1,
+                                "file_path": file_path,
+                            },
+                        )
+                    )
+    except Exception as exc:
+        print(f"Error loading PDF with pdfplumber: {exc}")
+        raise
+
     return documents
+
 
 def split_documents_semantically(documents: List[Document], embeddings) -> List[Document]:
     """
@@ -63,73 +53,118 @@ def split_documents_semantically(documents: List[Document], embeddings) -> List[
     print("Splitting documents using Semantic Chunking...")
     text_splitter = SemanticChunker(
         embeddings,
-        breakpoint_threshold_type="percentile" # or "gradient"
+        breakpoint_threshold_type="percentile",
     )
-    
-    # Note: SemanticChunker.split_documents might lose some metadata in older versions,
-    # but let's try standard split_documents
-    chunks = text_splitter.split_documents(documents)
-    return chunks
+    return text_splitter.split_documents(documents)
 
-def ingest_document(file_path: str):
+
+def _ingest_document_with_resources(
+    file_path: str,
+    embeddings,
+    vectorstore,
+    source_name: Optional[str] = None,
+) -> Dict[str, int]:
     """
-    Ingest a document using advanced RAG techniques.
+    Ingest a single PDF using already-initialized embeddings/vectorstore.
     """
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"File not found: {file_path}")
+    if not file_path.lower().endswith(".pdf"):
+        raise ValueError("Only PDF files are supported for ingestion.")
+
     print(f"--- Starting Ingestion for {file_path} ---")
-    
-    # 1. Initialize Embeddings
-    print(f"Initializing Embeddings: {EMBEDDING_MODEL}")
-    embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
-    
-    # 2. Load Document with Metadata
+    filename = source_name or os.path.basename(file_path)
+
     print("Loading document...")
-    raw_docs = load_pdf_with_metadata(file_path)
+    raw_docs = load_pdf_with_metadata(file_path, source_name=filename)
+    if not raw_docs:
+        raise ValueError("No extractable text found in the PDF.")
     print(f"Loaded {len(raw_docs)} pages.")
-    
-    # 3. Semantic Chunking
+
     chunks = split_documents_semantically(raw_docs, embeddings)
     print(f"Created {len(chunks)} semantic chunks.")
-    
-    # 4. Initialize Pinecone
-    pc = Pinecone(api_key=PINECONE_API_KEY)
-    
-    existing_indexes = pc.list_indexes().names()
-    if PINECONE_INDEX_NAME not in existing_indexes:
-        print(f"Creating index: {PINECONE_INDEX_NAME}")
-        try:
-             # Default heuristic for serverless
-             if "gcp" in PINECONE_ENVIRONMENT or "aws" in PINECONE_ENVIRONMENT:
-                 cloud = "aws" if "aws" in PINECONE_ENVIRONMENT else "gcp"
-                 pc.create_index(
-                    name=PINECONE_INDEX_NAME,
-                    dimension=384, # standard for all-MiniLM-L6-v2
-                    metric="cosine",
-                    spec=ServerlessSpec(cloud=cloud, region=PINECONE_ENVIRONMENT)
-                )
-        except Exception as e:
-            print(f"Fallback to PodSpec due to: {e}")
-            pc.create_index(
-                name=PINECONE_INDEX_NAME,
-                dimension=384,
-                metric="cosine",
-                spec=PodSpec(environment=PINECONE_ENVIRONMENT)
-            )
-        
-        while not pc.describe_index(PINECONE_INDEX_NAME).status['ready']:
-            time.sleep(1)
-            
-    # 5. Upsert to Vector Store
-    print("Upserting to Pinecone...")
-    os.environ["PINECONE_API_KEY"] = PINECONE_API_KEY
-    PineconeVectorStore.from_documents(
-        chunks,
-        embeddings,
-        index_name=PINECONE_INDEX_NAME
-    )
+
+    print(f"Upserting to ChromaDB at {CHROMA_PERSIST_DIRECTORY}...")
+    vectorstore.delete(where={"source": filename})
+
+    ids = []
+    for idx, chunk in enumerate(chunks):
+        chunk.metadata["chunk_index"] = idx
+        ids.append(f"{filename}:{chunk.metadata.get('page', 'na')}:{idx}")
+
+    vectorstore.add_documents(chunks, ids=ids)
     print("Ingestion Complete!")
+    return {"pages": len(raw_docs), "chunks": len(chunks)}
+
+
+def ingest_document(file_path: str, source_name: Optional[str] = None) -> Dict[str, int]:
+    """
+    Ingest a document using advanced RAG techniques (ChromaDB).
+    """
+    print(f"Initializing Embeddings: {EMBEDDING_MODEL}")
+    embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
+    print(f"Connecting ChromaDB at {CHROMA_PERSIST_DIRECTORY}...")
+    vectorstore = get_chroma_vectorstore(embeddings, allow_repair=True)
+    return _ingest_document_with_resources(
+        file_path=file_path,
+        embeddings=embeddings,
+        vectorstore=vectorstore,
+        source_name=source_name,
+    )
+
+
+def ingest_documents(file_paths: List[str], source_names: Optional[List[str]] = None) -> Dict[str, object]:
+    """
+    Batch ingest multiple PDFs with shared embeddings/vectorstore initialization.
+    """
+    if not file_paths:
+        return {"ingested": [], "failed": [], "total_chunks": 0}
+
+    if source_names and len(source_names) != len(file_paths):
+        raise ValueError("source_names length must match file_paths length.")
+
+    print(f"Initializing Embeddings once for batch: {EMBEDDING_MODEL}")
+    embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
+    print(f"Connecting ChromaDB once for batch at {CHROMA_PERSIST_DIRECTORY}...")
+    vectorstore = get_chroma_vectorstore(embeddings, allow_repair=True)
+
+    ingested = []
+    failed = []
+    total_chunks = 0
+
+    for idx, file_path in enumerate(file_paths):
+        source_name = source_names[idx] if source_names else None
+        try:
+            stats = _ingest_document_with_resources(
+                file_path=file_path,
+                embeddings=embeddings,
+                vectorstore=vectorstore,
+                source_name=source_name,
+            )
+            total_chunks += stats["chunks"]
+            ingested.append(
+                {
+                    "file_path": file_path,
+                    "source": source_name or os.path.basename(file_path),
+                    "pages": stats["pages"],
+                    "chunks": stats["chunks"],
+                }
+            )
+        except Exception as exc:
+            failed.append(
+                {
+                    "file_path": file_path,
+                    "source": source_name or os.path.basename(file_path),
+                    "error": str(exc),
+                }
+            )
+
+    return {"ingested": ingested, "failed": failed, "total_chunks": total_chunks}
+
 
 if __name__ == "__main__":
     import sys
+
     if len(sys.argv) < 2:
         print("Usage: python src/ingestion.py <path_to_pdf>")
     else:

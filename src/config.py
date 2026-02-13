@@ -10,11 +10,8 @@ HUGGINGFACE_MODEL = os.getenv("HUGGINGFACE_MODEL", "meta-llama/Meta-Llama-3-70B-
 # Embedding Model Configuration
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 
-# Pinecone Configuration (Required)
-PINECONE_API_KEY = os.getenv("PINECONE_API_KEY", "")
-# PINECONE_ENVIRONMENT is often not needed for newer indexes/client but kept for compatibility
-PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT", "") 
-PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "rag-document-qa")
+# ChromaDB Configuration
+CHROMA_PERSIST_DIRECTORY = os.getenv("CHROMA_PERSIST_DIRECTORY", os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "chroma_db"))
 
 # Chunking Configuration
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "800")) # Increased for semantic chunking base
@@ -27,10 +24,6 @@ RERANK_TOP_K = int(os.getenv("RERANK_TOP_K", "3"))
 # System Settings
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 os.makedirs(DATA_DIR, exist_ok=True)
-
-# Validate configuration
-if not PINECONE_API_KEY:
-    raise ValueError("PINECONE_API_KEY is required. Please set it in your .env file.")
 
 if not HUGGINGFACE_API_KEY:
     print("Warning: HUGGINGFACE_API_KEY not set. Generation will fail.")

@@ -45,7 +45,9 @@ Thumbs.db
 .cache/
 models/
 
-# Vector stores (Pinecone stores vectors in cloud, no local files to ignore)
+# Vector stores
+data/chroma_db/
+data/chroma_db_corrupt_*/
 
 # Streamlit
 .streamlit/
